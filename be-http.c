@@ -38,6 +38,8 @@
 #include "envs.h"
 #include <curl/curl.h>
 
+CURLSH *share = NULL;
+
 static int get_string_envs(CURL *curl, const char *required_env, char *querystring)
 {
 	char *data = NULL;
@@ -116,6 +118,9 @@ static int http_post(void *handle, char *uri, const char *clientid, const char *
 		_fatal("create curl_easy_handle fails");
 		return BACKEND_ERROR;
 	}
+
+	curl_easy_setopt(curl, CURLOPT_SHARE, share);
+	
 	if (conf->hostheader != NULL)
 		headerlist = curl_slist_append(headerlist, conf->hostheader);
 	headerlist = curl_slist_append(headerlist, "Expect:");
@@ -293,6 +298,9 @@ void *be_http_init()
 	_log(LOG_DEBUG, "superuser_params=%s", conf->superuser_envs);
 	_log(LOG_DEBUG, "aclcheck_params=%s", conf->aclcheck_envs);
 	_log(LOG_DEBUG, "retry_count=%d", conf->retry_count);
+
+	share = curl_share_init();
+	curl_share_setopt(share, CURLSHOPT_SHARE, CURL_LOCK_DATA_DNS);
 
 	return (conf);
 };

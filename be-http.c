@@ -119,7 +119,7 @@ static void unlock(CURL *handle, curl_lock_data data, void *useptr ){
 }
 
 static CURL* my_curl_easy_init() {
-	CURL* curl;
+	CURL* curl = NULL;
 
 	pthread_mutex_lock(&curl_pool_locker);
 	if (curl_pool_current > 0) {

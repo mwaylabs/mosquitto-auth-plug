@@ -36,8 +36,18 @@
 #include "hash.h"
 #include "log.h"
 #include "envs.h"
-#include <pthread.h>
 #include <curl/curl.h>
+
+#ifndef WIN32
+#include <pthread.h>
+#else
+#define PTHREAD_MUTEX_INITIALIZER {0}
+#define pthread_mutex_t CRITICAL_SECTION
+#define pthread_mutex_lock(mutex) EnterCriticalSection(mutex)
+#define pthread_mutex_unlock(mutex) LeaveCriticalSection(mutex)
+#define pthread_mutex_init(mutex, attr) InitializeCriticalSection(mutex)
+#define pthread_mutex_destroy(mutex) DeleteCriticalSection(mutex)
+#endif
 
 #define NO_OF_THREAD 200L
 CURLSH *share = NULL;
@@ -350,6 +360,8 @@ void *be_http_init()
 	_log(LOG_DEBUG, "aclcheck_params=%s", conf->aclcheck_envs);
 	_log(LOG_DEBUG, "retry_count=%d", conf->retry_count);
 
+	pthread_mutex_init(&curl_pool_locker, NULL);
+	pthread_mutex_init(&share_locker, NULL);
 	share = curl_share_init();
 
 	curl_share_setopt(share, CURLSHOPT_LOCKFUNC, lock);
@@ -376,6 +388,9 @@ void be_http_destroy(void *handle)
 		curl_global_cleanup();
 		free(conf);
 	}
+
+	pthread_mutex_destroy(&curl_pool_locker);
+	pthread_mutex_destroy(&share_locker);
 };
 
 int be_http_getuser(void *handle, const char *username, const char *password, char **phash, const char *clientid) {

@@ -39,7 +39,7 @@
 #include <pthread.h>
 #include <curl/curl.h>
 
-#define NO_OF_THREAD 200
+#define NO_OF_THREAD 200L
 CURLSH *share = NULL;
 pthread_mutex_t share_locker = PTHREAD_MUTEX_INITIALIZER;
 CURL *curl_pool[NO_OF_THREAD];
@@ -173,7 +173,7 @@ static int http_post(void *handle, char *uri, const char *clientid, const char *
 	}
 
 	if (conf->hostheader != NULL)
-			headerlist = curl_slist_append(headerlist, conf->hostheader);
+		headerlist = curl_slist_append(headerlist, conf->hostheader);
 		headerlist = curl_slist_append(headerlist, "Expect:");
 
 	if(conf->basic_auth !=NULL){
@@ -241,7 +241,7 @@ static int http_post(void *handle, char *uri, const char *clientid, const char *
 
 	_log(LOG_DEBUG, "url=%s", url);
 	_log(LOG_DEBUG, "data=%s", data);
-	curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+	//curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_POST, 1L);
@@ -368,7 +368,7 @@ void be_http_destroy(void *handle)
 {
 	struct http_backend *conf = (struct http_backend *)handle;
 
-	while (curl_pool_current > 0) {
+	while (curl_pool_current > 0L) {
 		curl_easy_cleanup(curl_pool[--curl_pool_current]);
 	}
 

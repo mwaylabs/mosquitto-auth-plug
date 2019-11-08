@@ -174,7 +174,7 @@ static int http_post(void *handle, char *uri, const char *clientid, const char *
 
 	if (conf->hostheader != NULL)
 		headerlist = curl_slist_append(headerlist, conf->hostheader);
-		headerlist = curl_slist_append(headerlist, "Expect:");
+	headerlist = curl_slist_append(headerlist, "Expect:");
 
 	if(conf->basic_auth !=NULL){
 		headerlist = curl_slist_append(headerlist, conf->basic_auth);

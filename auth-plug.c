@@ -27,6 +27,10 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifdef WIN32
+#define PLUGIN_API __declspec(dllexport)
+#endif
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -34,8 +38,34 @@
 #include <mosquitto.h>
 #include <mosquitto_broker.h>
 #include <mosquitto_plugin.h>
-#include <fnmatch.h>
 #include <time.h>
+
+#ifndef WIN32
+#include <fnmatch.h>
+#else
+#include <windows.h>
+#include <shlwapi.h>
+#define fnmatch(a, b, c) PathMatchSpecA(a, b)
+extern char* strsep(char** stringp, const char* delim)
+{
+	char* start = *stringp;
+	char* p;
+
+	p = (start != NULL) ? strpbrk(start, delim) : NULL;
+
+	if (p == NULL)
+	{
+		*stringp = NULL;
+	}
+	else
+	{
+		*p = '\0';
+		*stringp = p + 1;
+	}
+
+	return start;
+}
+#endif
 
 #if LIBMOSQUITTO_VERSION_NUMBER >= 1004090
 # define MOSQ_DENY_AUTH	MOSQ_ERR_PLUGIN_DEFER

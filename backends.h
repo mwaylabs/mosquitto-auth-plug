@@ -45,9 +45,6 @@
 #ifndef BACKEND_DENY
 # define BACKEND_DENY (3)
 #endif
-#ifndef BACKEND_THREAD_NOT_LOCKED
-# define BACKEND_THREAD_NOT_LOCKED (4)
-#endif
 
 #ifndef __BACKENDS_H
 # define __BACKENDS_H

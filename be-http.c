@@ -37,14 +37,14 @@
 #include "log.h"
 #include "envs.h"
 #include <pthread.h>
-#include <stdint.h>
 #include <curl/curl.h>
 
 #define NO_OF_THREAD 200
 CURLSH *share = NULL;
-CURL *curl[NO_OF_THREAD];
-pthread_mutex_t locker = PTHREAD_MUTEX_INITIALIZER;
-static uint16_t thread_count = 0;
+pthread_mutex_t share_locker = PTHREAD_MUTEX_INITIALIZER;
+CURL *curl_pool[NO_OF_THREAD];
+volatile size_t curl_pool_current = 0L;
+pthread_mutex_t curl_pool_locker = PTHREAD_MUTEX_INITIALIZER;
 
 static int get_string_envs(CURL *curl, const char *required_env, char *querystring)
 {
@@ -103,39 +103,55 @@ static int get_string_envs(CURL *curl, const char *required_env, char *querystri
 
 static void lock(CURL *handle, curl_lock_data data, curl_lock_access
 access,void *useptr ){
-
-if ((curl[thread_count] = curl_easy_init()) == NULL) {
-	_fatal("create curl_easy_handle fails");
-	return;
-}
-
-(void)handle; /* unused */
-(void)useptr; /* unused */ 
-(void)access; /* unused */
-(void)data;  /* unused */ 
-thread_count++;
-pthread_mutex_lock(&locker);
+	(void)handle; /* unused */
+	(void)useptr; /* unused */ 
+	(void)access; /* unused */
+	(void)data;  /* unused */ 
+	pthread_mutex_lock(&share_locker);
 }
 
 /* unlock callback */
 static void unlock(CURL *handle, curl_lock_data data, void *useptr ){
-(void)handle; /* unused */
-(void)useptr; /* unused */
-(void)data;   /* unused */
-
-if (thread_count == 0){
-	_fatal("curl_easy_handle not created");
-	return;
+	(void)handle; /* unused */
+	(void)useptr; /* unused */
+	(void)data;   /* unused */
+	pthread_mutex_unlock(&share_locker);
 }
 
-curl_easy_cleanup(curl[thread_count -1]);
-thread_count--;
-pthread_mutex_unlock(&locker);
+static CURL* my_curl_easy_init() {
+	CURL* curl;
+
+	pthread_mutex_lock(&curl_pool_locker);
+	if (curl_pool_current > 0) {
+		curl = curl_pool[--curl_pool_current];
+	}
+	pthread_mutex_unlock(&curl_pool_locker);
+
+	if (curl == NULL) {
+		if ((curl = curl_easy_init()) != NULL) {
+			curl_easy_setopt(curl, CURLOPT_SHARE, share);
+		}
+	}
+	return curl;
+}
+
+static void my_curl_easy_cleanup(CURL* curl) {
+	pthread_mutex_lock(&curl_pool_locker);
+	if (curl_pool_current < sizeof(curl_pool)/sizeof(curl_pool[curl_pool_current])) {
+		curl_pool[curl_pool_current++] = curl;
+		curl = NULL;
+	}
+	pthread_mutex_unlock(&curl_pool_locker);
+
+	if (curl != NULL) {
+		curl_easy_cleanup(curl);
+	}
 }
 
 static int http_post(void *handle, char *uri, const char *clientid, const char *username, const char *password, const char *topic, int acc, int method)
 {
 	struct http_backend *conf = (struct http_backend *)handle;
+	CURL *curl;
 	struct curl_slist *headerlist=NULL;
 	int re, urllen = 0;
 	int respCode = 0;
@@ -151,12 +167,10 @@ static int http_post(void *handle, char *uri, const char *clientid, const char *
 	password = (password && *password) ? password : "";
 	topic    = (topic && *topic) ? topic : "";
 
-
-	if (thread_count == 0){
-		return BACKEND_THREAD_NOT_LOCKED;
+	if ((curl = my_curl_easy_init()) == NULL) {
+		_fatal("create curl_easy_handle fails");
+		return BACKEND_ERROR;
 	}
-
-	curl_easy_setopt(curl[thread_count -1], CURLOPT_SHARE, share);
 
 	if (conf->hostheader != NULL)
 			headerlist = curl_slist_append(headerlist, conf->hostheader);
@@ -182,10 +196,10 @@ static int http_post(void *handle, char *uri, const char *clientid, const char *
 		conf->port,
 		uri);
 
-	char* escaped_username = curl_easy_escape(curl[thread_count -1], username, 0);
-	char* escaped_password = curl_easy_escape(curl[thread_count -1], password, 0);
-	char* escaped_topic = curl_easy_escape(curl[thread_count -1], topic, 0);
-	char* escaped_clientid = curl_easy_escape(curl[thread_count -1], clientid, 0);
+	char* escaped_username = curl_easy_escape(curl, username, 0);
+	char* escaped_password = curl_easy_escape(curl, password, 0);
+	char* escaped_topic = curl_easy_escape(curl, topic, 0);
+	char* escaped_clientid = curl_easy_escape(curl, clientid, 0);
 
 	char string_acc[20];
 	snprintf(string_acc, 20, "%d", acc);
@@ -201,11 +215,11 @@ static int http_post(void *handle, char *uri, const char *clientid, const char *
 	//get the sys_env from here
 	int env_num = 0;
 	if ( method == METHOD_GETUSER && conf->getuser_envs != NULL ){
-		env_num = get_string_envs(curl[thread_count -1], conf->getuser_envs, string_envs);
+		env_num = get_string_envs(curl, conf->getuser_envs, string_envs);
 	}else if ( method == METHOD_SUPERUSER && conf->superuser_envs != NULL ){
-		env_num = get_string_envs(curl[thread_count -1], conf->superuser_envs, string_envs);
+		env_num = get_string_envs(curl, conf->superuser_envs, string_envs);
 	} else if ( method == METHOD_ACLCHECK && conf->aclcheck_envs != NULL ){
-		env_num = get_string_envs(curl[thread_count -1], conf->aclcheck_envs, string_envs);
+		env_num = get_string_envs(curl, conf->aclcheck_envs, string_envs);
 	}
 	if( env_num == -1 ){
 		return BACKEND_ERROR;
@@ -227,20 +241,20 @@ static int http_post(void *handle, char *uri, const char *clientid, const char *
 
 	_log(LOG_DEBUG, "url=%s", url);
 	_log(LOG_DEBUG, "data=%s", data);
-	curl_easy_setopt(curl[thread_count -1], CURLOPT_VERBOSE, 1L);
+	curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 
-	curl_easy_setopt(curl[thread_count -1], CURLOPT_URL, url);
-	curl_easy_setopt(curl[thread_count -1], CURLOPT_POST, 1L);
-	curl_easy_setopt(curl[thread_count -1], CURLOPT_POSTFIELDS, data);
-	curl_easy_setopt(curl[thread_count -1], CURLOPT_HTTPHEADER, headerlist);
-	curl_easy_setopt(curl[thread_count -1], CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
-	curl_easy_setopt(curl[thread_count -1], CURLOPT_USERNAME, username);
-	curl_easy_setopt(curl[thread_count -1], CURLOPT_PASSWORD, password);
-	curl_easy_setopt(curl[thread_count -1], CURLOPT_TIMEOUT, 10);
+	curl_easy_setopt(curl, CURLOPT_URL, url);
+	curl_easy_setopt(curl, CURLOPT_POST, 1L);
+	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data);
+	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headerlist);
+	curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+	curl_easy_setopt(curl, CURLOPT_USERNAME, username);
+	curl_easy_setopt(curl, CURLOPT_PASSWORD, password);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10);
 
-	re = curl_easy_perform(curl[thread_count -1]);
+	re = curl_easy_perform(curl);
 	if (re == CURLE_OK) {
-		re = curl_easy_getinfo(curl[thread_count -1], CURLINFO_RESPONSE_CODE, &respCode);
+		re = curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &respCode);
 		if (re == CURLE_OK && respCode >= 200 && respCode < 300) {
 			ok = BACKEND_ALLOW;
 		} else if (re == CURLE_OK && respCode >= 500) {
@@ -253,6 +267,7 @@ static int http_post(void *handle, char *uri, const char *clientid, const char *
 		ok = BACKEND_ERROR;
 	}
 
+	my_curl_easy_cleanup(curl);
 	curl_slist_free_all (headerlist);
 	free(url);
 	free(data);
@@ -341,12 +356,21 @@ void *be_http_init()
   	curl_share_setopt(share, CURLSHOPT_UNLOCKFUNC, unlock);
 
 	curl_share_setopt(share, CURLSHOPT_SHARE, CURL_LOCK_DATA_DNS);
+	curl_share_setopt(share, CURLSHOPT_SHARE, CURL_LOCK_DATA_SSL_SESSION);
+	curl_share_setopt(share, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT);
+	#ifdef CURL_LOCK_DATA_PSL
+	curl_share_setopt(share, CURLSHOPT_SHARE, CURL_LOCK_DATA_PSL);
+	#endif
 
 	return (conf);
 };
 void be_http_destroy(void *handle)
 {
 	struct http_backend *conf = (struct http_backend *)handle;
+
+	while (curl_pool_current > 0) {
+		curl_easy_cleanup(curl_pool[--curl_pool_current]);
+	}
 
 	if (conf) {
 		curl_global_cleanup();

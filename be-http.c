@@ -113,8 +113,8 @@ if ((curl[thread_count] = curl_easy_init()) == NULL) {
 (void)useptr; /* unused */ 
 (void)access; /* unused */
 (void)data;  /* unused */ 
-pthread_mutex_lock(&locker);
 thread_count++;
+pthread_mutex_lock(&locker);
 }
 
 /* unlock callback */

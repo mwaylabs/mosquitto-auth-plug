@@ -49,7 +49,7 @@
 #define pthread_mutex_destroy(mutex) DeleteCriticalSection(mutex)
 #endif
 
-#define NO_OF_THREAD 200L
+#define NO_OF_THREAD 128L
 CURLSH *share = NULL;
 pthread_mutex_t share_locker = PTHREAD_MUTEX_INITIALIZER;
 CURL *curl_pool[NO_OF_THREAD];
@@ -140,6 +140,7 @@ static CURL* my_curl_easy_init() {
 	if (curl == NULL) {
 		if ((curl = curl_easy_init()) != NULL) {
 			curl_easy_setopt(curl, CURLOPT_SHARE, share);
+			curl_easy_setopt(curl, CURLOPT_MAXCONNECTS, NO_OF_THREAD);
 		}
 	}
 	return curl;
@@ -257,9 +258,6 @@ static int http_post(void *handle, char *uri, const char *clientid, const char *
 	curl_easy_setopt(curl, CURLOPT_POST, 1L);
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data);
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headerlist);
-	curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
-	curl_easy_setopt(curl, CURLOPT_USERNAME, username);
-	curl_easy_setopt(curl, CURLOPT_PASSWORD, password);
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10);
 
 	re = curl_easy_perform(curl);
